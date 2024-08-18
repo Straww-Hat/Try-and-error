@@ -1,0 +1,90 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.signal import butter, filtfilt
+from scipy.sparse import diags
+from scipy.sparse.linalg import spsolve
+from scipy.fft import fft, ifft, fftfreq
+
+# Function to handle NaN values by replacing them with the mean of the non-NaN values
+def handle_nan_values(signal):
+    mean_value = np.nanmean(signal)  # Calculate mean of non-NaN values
+    return np.nan_to_num(signal, nan=mean_value)  # Replace NaN with the mean value
+
+# Step 1: Apply FFT filtering to reduce noise
+def apply_fft_filter(signal, fs, low_cutoff=1, high_cutoff=25):
+    N = len(signal)
+    yf = fft(signal)
+    xf = fftfreq(N, 1 / fs)
+    yf[np.abs(xf) < low_cutoff] = 0
+    yf[np.abs(xf) > high_cutoff] = 0
+    filtered_signal = ifft(yf).real
+    return filtered_signal
+
+# Step 2: Apply L1 trend filtering
+def l1_trend_filter(y, lamb):
+    n = len(y)
+    if n < 3:
+        raise ValueError("Input signal is too short to apply L1 trend filtering.")
+    
+    D = diags([1, -2, 1], [0, 1, 2], shape=(n-2, n)).tocsc()
+    I = diags([1], [0], shape=(n, n)).tocsc()
+
+    z = y.copy()
+    for _ in range(10):
+        w = lamb / (np.abs(D @ z) + 1e-4)
+        W = diags([w], [0], shape=(n-2, n-2)).tocsc()
+        z = spsolve(I + D.T @ W @ D, y)
+    return z
+
+# Load the input data
+input_file = 'C:/Users/rutuj/Downloads/PolarDataYusufnew.csv'
+data = pd.read_csv(input_file)
+ecg_data = data['ECG'].values
+time_data = data['Time1'].values
+
+# Handle NaN values in the ECG data
+ecg_data = handle_nan_values(ecg_data)
+
+# Define parameters
+fs = 129.95  # Sampling frequency
+lambda_value = 275  # For L1 trend filtering
+
+# Specify time range for analysis
+start_time = 59.981  # Start time in seconds
+end_time = 69.977   # End time in seconds
+
+# Select data within the specified time range
+time_mask = (time_data >= start_time) & (time_data <= end_time)
+selected_time = time_data[time_mask]
+selected_ecg = ecg_data[time_mask]
+
+# Apply FFT filtering
+fft_filtered_ecg = apply_fft_filter(selected_ecg, fs)
+
+# Apply L1 trend filtering
+l1_filtered_ecg = l1_trend_filter(fft_filtered_ecg, lambda_value)
+
+# Plot the original and final filtered signals
+plt.figure(figsize=(15, 10))
+
+# Plot Original Signal
+plt.subplot(2, 1, 1)
+plt.plot(selected_time, selected_ecg, label='Original ECG', color='blue')
+plt.title(f'Original ECG Signal (Time Range: {start_time}-{end_time} seconds)')
+plt.xlabel('Time (s)')
+plt.ylabel('Amplitude (mV)')
+plt.legend()
+plt.grid(True)
+
+# Plot Final Filtered Signal
+plt.subplot(2, 1, 2)
+plt.plot(selected_time, l1_filtered_ecg, label='Final Filtered ECG', color='purple')
+plt.title(f'Final Filtered ECG Signal (Time Range: {start_time}-{end_time} seconds)')
+plt.xlabel('Time (s)')
+plt.ylabel('Amplitude (mV)')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
